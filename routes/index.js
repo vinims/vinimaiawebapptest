@@ -8,6 +8,25 @@ var bcrypt = require('bcrypt');
 const saltRounds = 10;
 
 var url = require('url');
+var request = require('request');
+
+var multer = require('multer');
+
+// Set Storage Engine
+const storage = multer.diskStorage({
+    destination: './public/uploads/',
+    filename: function (req, file, cb) {
+        var extArray = file.mimetype.split("/");
+        var extension = extArray[extArray.length - 1];
+        cb(null, file.fieldname + '-' + Date.now() + '.' + extension)
+    }
+});
+
+// init upload
+const upload = multer({
+    storage: storage
+}).single('userPhoto');
+
 
 /* GET home page. */
 router.get('/', function (req, res) {
@@ -23,16 +42,44 @@ router.get('/profile', authenticationMiddleware(), function (req, res) {
     const db = require('../db.js');
     var userloged = req.user.user_id;
 
-    db.query('SELECT username,email FROM users WHERE id = ?', [userloged], function (error, results, fields) {
+    db.query('SELECT username,email,User_Profile_Photo FROM users WHERE id = ?', [userloged], function (error, results, fields) {
         if (error) throw error;
 
         res.render('profile', {
             title: 'Profile',
             showusername: JSON.stringify(results[0].username).replace(/\"/g, ""),
             showemail: JSON.stringify(results[0].email).replace(/\"/g, ""),
+            userpicture: '/uploads/' + JSON.stringify(results[0].User_Profile_Photo).replace(/\"/g, ""),
         });
 
     });
+});
+
+router.post('/profile', function (req, res, next) {
+
+    upload(req, res, (err) => {
+        if (err) {
+            res.render('profile', {
+                msg: err
+            });
+        } else {
+            var userloged = req.user.user_id;
+            var newfilename = req.file.filename;
+            console.log(req.file);
+            const db = require('../db.js');
+
+            db.query('UPDATE users SET User_Profile_Photo = ? WHERE id = ?', [newfilename, userloged], function (error, results, fields) {
+                if (error) throw error;
+
+                res.render('Profile', {
+                    title: 'Picture updated Sucessfully',
+                    userpicture: '/uploads/' + newfilename,
+                });
+
+            })
+        }
+    });
+
 });
 
 router.get('/login', function (req, res) {
@@ -85,7 +132,6 @@ router.post('/register', function (req, res, next) {
         const email = req.body.email;
         const password = req.body.password;
 
-
         const db = require('../db.js');
 
         bcrypt.hash(password, saltRounds, function (err, hash) {
@@ -122,7 +168,7 @@ router.post('/Creategroup', function (req, res, next) {
     const GroupPhoto = req.body.GroupPhoto;
     const GroupCreator = (req.user.user_id);
     const GroupMembers = '[ ' + GroupCreator + ']';
-    
+
     const db = require('../db.js');
 
     db.query('INSERT INTO groups (Group_name, Group_Activity, Group_Photo, Group_creator, Group_members) VALUES (?, ? , ?, ?, ?)', [GroupName, GroupActivity, GroupPhoto, GroupCreator, GroupMembers], function (error, results, fields) {
@@ -136,65 +182,159 @@ router.post('/Creategroup', function (req, res, next) {
 });
 
 router.get('/mygroups', function (req, res, next) {
-    
+
     const db = require('../db.js');
 
-    db.query('SELECT id, Group_name, Group_Activity, Group_Photo, Group_Creator, Group_members FROM groups ', function (error, results, fields) {
-        if (error) throw error;
-        var grouplist = [];
-        
-        const UserID = (req.user.user_id);
-        
-        for (var i = 0; i < results.length; i++){
-            var memberlist = results[i].Group_members;
-                
-           for (var j = 0; j < memberlist.length; j++){ 
-              if (memberlist[j] == UserID){
-                  grouplist.push(results[i]);
-          } 
-           } 
-        }
-        
-        var groupcards = '';
-        for (var k = 0; k < grouplist.length; k++){ 
-            
-              var groupname = "<a href='group?" + grouplist[k].id + "'><div class='groupcarddiv'><h3>" + grouplist[k].Group_name + "</h3>";
-              var groupActivity = "<p>" + grouplist[k].Group_Activity + "</p>";
-              var groupPhoto = "<p>" + grouplist[k].Group_Photo + "</p>";
-              var groupCreator = "<p>" + grouplist[k].Group_Creator + "</p>";
-              var groupMembers = "<p>" + grouplist[k].Group_members + "</p></div></a>";
-            
+    let grouplist = [];
+    var groupcards = '';
+    var imgreturned = '';
+
+    var dbgroupreturn = new Promise(function (resolve, reject) {
+        db.query('SELECT id, Group_name, Group_Activity, Group_Photo, Group_Creator, Group_members FROM groups ', function (error, results, fields) {
+            if (error) throw error;
+
+            const UserID = (req.user.user_id);
+
+            for (var i = 0; i < results.length; i++) {
+                var memberlist = results[i].Group_members;
+
+                for (var j = 0; j < memberlist.length; j++) {
+                    if (memberlist[j] == UserID) {
+                        grouplist.push(results[i]);
+
+                    }
+
+                }
+            }
+
+            resolve(grouplist);
+        })
+    }).then(function (grouplist) {
+        for (var k = 0; k < grouplist.length; k++) {
+            var groupname = "<a href='group?" + grouplist[k].id + "'><div class='groupcarddiv'><h3>" + grouplist[k].Group_name + "</h3>";
+            var groupActivity = "<p>" + grouplist[k].Group_Activity + "</p>";
+            var groupPhoto = "<p>" + grouplist[k].Group_Photo + "</p>";
+            var groupCreator = "<p>" + grouplist[k].Group_Creator + "</p>";
+
+            var groupmemberlist = JSON.parse(grouplist[k].Group_members);
+
+            async function findpicture(id) {
+                return new Promise(function (resolve, reject) {
+                    db.query('SELECT User_Profile_Photo FROM users WHERE id = ?', [id], function (error, results, fields) {
+                        if (error) {
+                            throw error;
+                        } else {
+                            imgname = results[0].User_Profile_Photo;
+                            resolve(imgname);
+                        }
+                    });
+                });
+                return imgreturned
+            };
+
+            for (var m = 0; m < groupmemberlist.length; m++) {
+                var imgtag = findpicture(groupmemberlist[m]);
+                var imgtagresolved = imgtag.then(function (imgname) {
+
+                    var imgreturned = '<img href="/uploads/' + imgname + ">";
+                    return imgreturned;
+
+                })
+                console.log(imgtagresolved);
+                // intention is to define groupMembers = as a div with the img tags inside, I am letting the console.log above to show results I am getting before be sure I can use the promise value into this var
+            }
+
+
+
+            var groupMembers = "<p>" + grouplist[k] + "</p></div></a>";
             groupcards += groupname + groupActivity + groupPhoto + groupCreator + groupMembers;
-           };
-        
+        }
+
         res.render('mygroups', {
             title: 'Groups',
             showgroups: groupcards,
         });
-
     })
-});
+
+
+    /*   var groupcards = '';
+       for (var k = 0; k < grouplist.length; k++) {
+
+           var groupname = "<a href='group?" + grouplist[k].id + "'><div class='groupcarddiv'><h3>" + grouplist[k].Group_name + "</h3>";
+           var groupActivity = "<p>" + grouplist[k].Group_Activity + "</p>";
+           var groupPhoto = "<p>" + grouplist[k].Group_Photo + "</p>";
+           var groupCreator = "<p>" + grouplist[k].Group_Creator + "</p>";
+
+           var groupmemberlist = JSON.parse(grouplist[k].Group_members);
+
+           let imgFromId;
+           let imgtag;
+
+           function returnimage(imgid) {
+               imgtag = '<img href="/uploads/' + imgid[0].User_Profile_Photo + ">";
+
+           }
+
+           function findpicture(id, callback) {
+
+
+
+               return new Promise(function (resolve, reject) {
+                   var dbconnectionforpicture = db.query('SELECT User_Profile_Photo FROM users WHERE id = ?', [id], function (error, results, fields) {
+                       if (error) {
+                           throw error;
+                       } else {
+                           imgFromId = results;
+                       }
+                       callback(imgFromId);
+                   });
+                   request.get(dbconnectionforpicture, function (err, resp, body) {
+                       if (err) {
+                           reject(err);
+                       } else {
+                           resolve(console.log(imgtag));
+                       }
+                   })
+               })
+           };
+
+           for (var m = 0; m < groupmemberlist.length; m++) {
+               var imgreturned = findpicture(groupmemberlist[m], returnimage);
+
+           }
+
+
+
+           var groupMembers = "<p>" + grouplist[k] + "</p></div></a>";
+
+           groupcards += groupname + groupActivity + groupPhoto + groupCreator + groupMembers;
+       };*/
+
+
+
+})
+
 
 router.route('/group').get(function (req, res, next) {
     var q = url.parse(req.url, true);
     var urlgroup = q.search.slice(1);
-    
+
     console.log(urlgroup);
-    
+
     const db = require('../db.js');
 
     db.query('SELECT id,Group_Name FROM groups WHERE id = ?', [urlgroup], function (error, results, fields) {
         if (error) throw error;
-    
+
         console.log(results);
-        
-    res.render('group', {
-        title: 'Group',
-        groupname: JSON.stringify(results[0].id).replace(/\"/g, ""),
-        groupactivity: JSON.stringify(results[0].Group_Name).replace(/\"/g, ""),
-    });
-        
+
+        res.render('group', {
+            title: 'Group',
+            groupname: JSON.stringify(results[0].id).replace(/\"/g, ""),
+            groupactivity: JSON.stringify(results[0].Group_Name).replace(/\"/g, ""),
         });
+
+    });
 });
 
 

@@ -11,7 +11,7 @@
         {{/each}}
     {{/if}}
     
-    <form method="post" action="/register"> 
+    <form method="post" action="/register" enctype="multipart/form"> 
         <div class="form-group">
             <label for="username">Username</label>
             <input type="text" name="username" class="form-control" placeholder="username">
@@ -28,7 +28,6 @@
             <label for="passwordmatch">Re-Enter Password</label>
             <input type="password" name="passwordmatch" class="form-control" placeholder="password">
         </div>
-        <button type="submit" class="btn btn-primary">Submit</button>
     </form>
 </div>
 
